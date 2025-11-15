@@ -8,5 +8,5 @@ fn main() {
         let _ = git_struct.print();
     } else {
         println!("Error printing");
-    }
+    }   
 }
