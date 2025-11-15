@@ -1,3 +1,4 @@
+use chrono::{DateTime};
 use git2::{Error, Repository};
 
 fn main() -> Result<(), Error> {
@@ -11,7 +12,16 @@ fn main() -> Result<(), Error> {
     for node in revwalk {
         let oid = node?;
         let commit = repo.find_commit(oid)?;
-        println!("{} {}", oid, commit.summary().unwrap_or(""));
+
+        let commit_time = commit.time().seconds();
+        let datetime = DateTime::from_timestamp(commit_time, 0).unwrap_or_default();
+
+        println!(
+            "{} at {} {}",
+            oid,
+            datetime,
+            commit.summary().unwrap_or("")
+        );
     }
 
     Ok(())
