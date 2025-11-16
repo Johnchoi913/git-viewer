@@ -1,5 +1,5 @@
-use chrono::DateTime;
-use git2::{Error, Repository, Revwalk, Oid};
+use chrono::{DateTime, Utc};
+use git2::{Error, Oid, Repository, Revwalk, Signature};
 use std::sync::{Arc, Mutex};
 
 pub struct GitStruct {
@@ -66,5 +66,39 @@ impl GitStruct {
          for node in revwalk {
             self.vec.lock().unwrap().push(node.unwrap());
         }
+    }
+
+    pub fn get_commit(&self) -> Oid {
+        let lock = self.vec.lock().unwrap();
+        lock[self.idx]
+    }
+
+    pub fn get_date(&self, oid: Oid) -> DateTime<Utc> {
+        let commit: git2::Commit<'_> = self.repo.find_commit(oid).unwrap();
+
+        let commit_time = commit.time().seconds();
+        DateTime::from_timestamp(commit_time, 0).unwrap_or_default()
+    }
+
+    pub fn get_author(&self, oid: Oid) -> (Option<String>, Option<String>) {
+        let commit: git2::Commit<'_> = self.repo.find_commit(oid).unwrap();
+
+        (commit.author().name().and_then(|x| Some(x.to_string())) , commit.author().email().and_then(|x| Some(x.to_string())))
+    }
+
+    pub fn increment_idx(&mut self) {
+        self.idx += 1;
+        self.idx = self.idx.min(self.get_len() - 1);
+    }
+
+    pub fn decrement_idx(&mut self) {
+        if self.idx == 0 {
+            return;
+        }
+        self.idx -= 1;
+    }
+
+    pub fn get_idx(&self) -> usize {
+        self.idx
     }
 }
