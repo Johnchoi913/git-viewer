@@ -64,6 +64,10 @@ impl<'a> App for DrawHandler {
             });
         });
 
+        TopBottomPanel::bottom("Timeline Panel").show(ctx, |ui| {
+            self.render_timeline(ui);
+        });
+
         let files = self.git_struct.get_file_tree(commit);
         self.current_files = files;
 
@@ -186,5 +190,90 @@ impl DrawHandler {
                 self.file_content = String::new();
             }
         }
+    }
+
+    fn render_timeline(&mut self, ui: &mut Ui) {
+        let total_commits = self.git_struct.get_len();
+
+        if total_commits == 0 {
+            ui.label("No commits loaded");
+            return;
+        }
+
+        let current_idx = self.git_struct.get_idx();
+
+        ui.vertical(|ui| {
+            ui.set_height(80.0);
+            ui.heading("Timeline");
+
+            let desired_size = egui::Vec2::new(ui.available_width(), 40.0);
+            let (response, painter) = ui.allocate_painter(desired_size, egui::Sense::click());
+
+            let rect = response.rect;
+
+            painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
+
+            let line_y = rect.center().y;
+            painter.line_segment(
+                [
+                    egui::pos2(rect.min.x + 10.0, line_y),
+                    egui::pos2(rect.max.x - 10.0, line_y),
+                ],
+                egui::Stroke::new(2.0, egui::Color32::from_gray(100)),
+            );
+
+            let usable_width = rect.width() - 20.0;
+            let start_x = rect.min.x + 10.0;
+
+            for i in 0..total_commits {
+                let x = start_x + (i as f32 / (total_commits - 1).max(1) as f32) * usable_width;
+                let y = line_y;
+
+                let (color, radius) = if i == current_idx {
+                    (egui::Color32::from_rgb(100, 200, 255), 6.0)
+                } else {
+                    (egui::Color32::from_gray(150), 4.0)
+                };
+
+                painter.circle_filled(egui::pos2(x, y), radius, color);
+            }
+
+            if response.clicked() {
+                if let Some(click_pos) = response.interact_pointer_pos() {
+                    let relative_x = click_pos.x - start_x;
+                    let normalized_x = (relative_x / usable_width).clamp(0.0, 1.0);
+                    let clicked_idx = (normalized_x * (total_commits - 1) as f32).round() as usize;
+
+                    self.jump_to_commit(clicked_idx);
+                }
+            }
+
+            ui.horizontal(|ui| {
+                ui.label(format!("Commit {} of {}", current_idx + 1, total_commits));
+            });
+        });
+    }
+
+    fn jump_to_commit(&mut self, target_idx: usize) {
+        let total = self.git_struct.get_len();
+        if total == 0 {
+            return;
+        }
+
+        let target_idx = target_idx.min(total - 1);
+
+        let current = self.git_struct.get_idx();
+
+        if target_idx > current {
+            for _ in 0..(target_idx - current) {
+                self.git_struct.increment_idx();
+            }
+        } else if target_idx < current {
+            for _ in 0..(current - target_idx) {
+                self.git_struct.decrement_idx();
+            }
+        }
+
+        self.reload_files();
     }
 }
