@@ -1,17 +1,22 @@
-use core::f32;
+use std::path::PathBuf;
 
 use crate::git_handle::GitStruct;
 use eframe::{App, Frame};
-use egui::{Button, CentralPanel, Grid, TopBottomPanel, Ui, Vec2, text_selection::text_cursor_state::ccursor_previous_word};
+use egui::{Button, CentralPanel, Grid, TopBottomPanel, Ui, Vec2};
+use git2::Oid;
 
 pub struct DrawHandler {
     git_struct: GitStruct,
+    current_files: Vec<(PathBuf, Oid)>,
+    selected_file: Option<PathBuf>,
+    file_content: String,
 }
 
 impl<'a> App for DrawHandler {
     fn update(&mut self, ctx: &egui::Context, frame: &mut Frame) {
+        let commit = self.git_struct.get_commit();
+
         TopBottomPanel::top("Top Panel").show(ctx, |ui| {
-            let commit = self.git_struct.get_commit();
             ui.label(format!("Current Commit: {}", commit));
             ui.label(format!("Commited on: {}", self.git_struct.get_date(commit)));
             ui.label(format!(
@@ -30,7 +35,7 @@ impl<'a> App for DrawHandler {
                 let width = ui.available_width();
                 let height = ui.available_height();
 
-                ui.add_space(width / 3.0);
+                ui.add_space((width - (width / 6.0 * 2.0)) / 2.0);
 
                 let prev_button = ui.add_enabled(self.git_struct.get_idx() > 0, |ui: &mut Ui| {
                     ui.add_sized(Vec2::new(width / 6.0, height), |ui: &mut Ui| {
@@ -38,20 +43,40 @@ impl<'a> App for DrawHandler {
                     })
                 });
 
-                let next_button = ui.add_enabled(self.git_struct.get_len() - 1 > self.git_struct.get_idx(), |ui: &mut Ui| {
-                    ui.add_sized(Vec2::new(width / 6.0, height), |ui: &mut Ui| {
-                        ui.button("Next")
-                    })
-                });
-                
+                let next_button = ui.add_enabled(
+                    self.git_struct.get_len() - 1 > self.git_struct.get_idx(),
+                    |ui: &mut Ui| {
+                        ui.add_sized(Vec2::new(width / 6.0, height), |ui: &mut Ui| {
+                            ui.button("Next")
+                        })
+                    },
+                );
+
                 if prev_button.clicked() {
                     self.git_struct.decrement_idx();
+                    self.reload_files();
                 }
 
                 if next_button.clicked() {
                     self.git_struct.increment_idx();
+                    self.reload_files();
                 }
+            });
+        });
 
+        let files = self.git_struct.get_file_tree(commit);
+        self.current_files = files;
+
+        CentralPanel::default().show(ctx, |ui| {
+            let available_height = ui.available_height();
+
+            ui.horizontal(|ui| {
+                ui.set_height(available_height);
+                self.render_file_tree(ui);
+
+                ui.separator();
+
+                self.render_file_viewer(ui);
             });
         });
 
@@ -61,6 +86,105 @@ impl<'a> App for DrawHandler {
 
 impl DrawHandler {
     pub fn new(git_struct: GitStruct) -> Self {
-        Self { git_struct }
+        let commit = git_struct.get_commit();
+        let current_files = git_struct.get_file_tree(commit);
+        Self {
+            git_struct,
+            current_files,
+            selected_file: None,
+            file_content: String::new(),
+        }
+    }
+
+    fn render_file_tree(&mut self, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            ui.set_width(250.0);
+            ui.heading("Files");
+
+            let mut clicked_file: Option<(PathBuf, Oid)> = None;
+
+            let available_height = ui.available_height();
+
+            egui::ScrollArea::vertical()
+                .id_salt("file tree")
+                .max_height(available_height)
+                .show(ui, |ui| {
+                    if self.current_files.is_empty() {
+                        ui.label("No files in this commit");
+                        return;
+                    }
+
+                    for (path, blob_id) in &self.current_files {
+                        let is_selected = self.selected_file.as_ref() == Some(path);
+
+                        if ui
+                            .selectable_label(is_selected, path.display().to_string())
+                            .clicked()
+                        {
+                            clicked_file = Some((path.clone(), *blob_id));
+                        }
+                    }
+                });
+
+            if let Some((path, blob_id)) = clicked_file {
+                self.handle_file_click(path, blob_id);
+            }
+        });
+    }
+
+    fn handle_file_click(&mut self, path: PathBuf, blob_id: Oid) {
+        self.selected_file = Some(path);
+
+        match self.git_struct.get_file_content(blob_id) {
+            Ok(content) => {
+                self.file_content = content;
+            }
+            Err(msg) => {
+                self.file_content = format!("Error: {}", msg);
+            }
+        }
+    }
+
+    fn render_file_viewer(&self, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            if let Some(path) = &self.selected_file {
+                ui.heading(path.display().to_string());
+            } else {
+                ui.heading("No file selected");
+            }
+
+            ui.separator();
+
+            let available_height = ui.available_height();
+
+            egui::ScrollArea::both()
+                .id_salt("file viewer")
+                .max_height(available_height)
+                .show(ui, |ui| {
+                    if self.file_content.is_empty() {
+                        ui.label("Select a file to view its contents");
+                    } else {
+                        ui.label(egui::RichText::new(&self.file_content).monospace());
+                    }
+                });
+        });
+    }
+
+    fn reload_files(&mut self) {
+        let commit = self.git_struct.get_commit();
+        self.current_files = self.git_struct.get_file_tree(commit);
+
+        if let Some(selected_path) = &self.selected_file {
+            if let Some((_, blob_id)) = self
+                .current_files
+                .iter()
+                .find(|(path, _)| path == selected_path)
+            {
+                self.handle_file_click(selected_path.clone(), *blob_id);
+            } else {
+                self.selected_file = None;
+                self.file_content = String::new();
+            }
+        }
     }
 }

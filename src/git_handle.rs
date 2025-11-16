@@ -1,11 +1,14 @@
 use chrono::{DateTime, Utc};
-use git2::{Error, Oid, Repository, Revwalk, Signature};
-use std::sync::{Arc, Mutex};
+use git2::{Blob, Error, Oid, Repository, Revwalk, Signature, Tree};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 pub struct GitStruct {
     repo: Repository,
     idx: usize,
-    pub vec: Arc<Mutex<Vec<Oid>>>, 
+    pub vec: Arc<Mutex<Vec<Oid>>>,
 }
 
 impl GitStruct {
@@ -63,7 +66,7 @@ impl GitStruct {
     }
 
     pub fn populate_from_walk(&mut self, revwalk: &mut Revwalk) {
-         for node in revwalk {
+        for node in revwalk {
             self.vec.lock().unwrap().push(node.unwrap());
         }
     }
@@ -83,7 +86,10 @@ impl GitStruct {
     pub fn get_author(&self, oid: Oid) -> (Option<String>, Option<String>) {
         let commit: git2::Commit<'_> = self.repo.find_commit(oid).unwrap();
 
-        (commit.author().name().and_then(|x| Some(x.to_string())) , commit.author().email().and_then(|x| Some(x.to_string())))
+        (
+            commit.author().name().and_then(|x| Some(x.to_string())),
+            commit.author().email().and_then(|x| Some(x.to_string())),
+        )
     }
 
     pub fn increment_idx(&mut self) {
@@ -100,5 +106,45 @@ impl GitStruct {
 
     pub fn get_idx(&self) -> usize {
         self.idx
+    }
+
+    pub fn get_file_tree(&self, oid: Oid) -> Vec<(PathBuf, Oid)> {
+        let commit = self.repo.find_commit(oid).unwrap();
+        let tree = commit.tree().unwrap();
+
+        let mut files = Vec::new();
+        self.walk_tree(&tree, PathBuf::new(), &mut files);
+
+        files
+    }
+
+    fn walk_tree(&self, tree: &Tree, current_path: PathBuf, files: &mut Vec<(PathBuf, Oid)>) {
+        for entry in tree.iter() {
+            let name = entry.name().unwrap(); // filename
+            let full_path = current_path.join(name);
+
+            match entry.kind() {
+                Some(git2::ObjectType::Tree) => {
+                    let subtree = self.repo.find_tree(entry.id()).unwrap();
+                    self.walk_tree(&subtree, full_path, files);
+                }
+                Some(git2::ObjectType::Blob) => {
+                    files.push((full_path, entry.id()));
+                }
+                _ => (),
+            }
+        }
+    }
+
+    pub fn get_file_content(&self, blob_id: Oid) -> Result<String, String> {
+        let blob = self
+            .repo
+            .find_blob(blob_id)
+            .map_err(|e| format!("Failed to find blob: {}", e))?;
+
+        match std::str::from_utf8(blob.content()) {
+            Ok(text) => Ok(text.to_string()),
+            Err(_) => Err("Binary file".to_string()),
+        }
     }
 }
