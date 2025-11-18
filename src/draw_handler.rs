@@ -207,7 +207,8 @@ impl DrawHandler {
             ui.heading("Timeline");
 
             let desired_size = egui::Vec2::new(ui.available_width(), 40.0);
-            let (response, painter) = ui.allocate_painter(desired_size, egui::Sense::click());
+            let (response, painter) =
+                ui.allocate_painter(desired_size, egui::Sense::click_and_drag());
 
             let rect = response.rect;
 
@@ -245,6 +246,32 @@ impl DrawHandler {
                     let clicked_idx = (normalized_x * (total_commits - 1) as f32).round() as usize;
 
                     self.jump_to_commit(clicked_idx);
+                }
+            }
+
+            if response.hovered() {
+                if let Some(hover_pos) = response.hover_pos() {
+                    let relative_x = hover_pos.x - start_x;
+                    let normalized_x = (relative_x / usable_width).clamp(0.0, 1.0);
+                    let hovered_idx = (normalized_x * (total_commits - 1) as f32).round() as usize;
+
+                    let x = start_x
+                        + (hovered_idx as f32 / (total_commits - 1).max(1) as f32) * usable_width;
+                    painter.circle_stroke(
+                        egui::pos2(x, line_y),
+                        8.0,
+                        egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 255, 100)),
+                    );
+                }
+            }
+
+            if response.dragged() {
+                if let Some(drag_pos) = response.interact_pointer_pos() {
+                    let relative_x = drag_pos.x - start_x;
+                    let normalized_x = (relative_x / usable_width).clamp(0.0, 1.0);
+                    let dragged_idx = (normalized_x * (total_commits - 1) as f32).round() as usize;
+
+                    self.jump_to_commit(dragged_idx);
                 }
             }
 
